@@ -1,13 +1,5 @@
 import inspect, sys, hashlib
-import nltk
-# module for training a Hidden Markov Model and tagging sequences
-from nltk.tag.hmm import HiddenMarkovModelTagger
 
-# module for computing a Conditional Frequency Distribution
-from nltk.probability import ConditionalFreqDist
-
-# module for computing a Conditional Probability Distribution
-from nltk.probability import ConditionalProbDist, LidstoneProbDist
 # Hack around a warning message deep inside scikit learn, loaded by nltk :-(
 #  Modelled on https://stackoverflow.com/a/25067818
 import warnings
@@ -25,10 +17,20 @@ except NameError:
 
 from nltk.corpus import brown
 from nltk.tag import map_tag, tagset_mapping
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# module for computing a Conditional Frequency Distribution
+from nltk.probability import ConditionalFreqDist
+
+# module for computing a Conditional Probability Distribution
+from nltk.probability import ConditionalProbDist
+
+from nltk.probability import LidstoneProbDist
+import itertools
+chain = itertools.chain.from_iterable
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 if map_tag('brown', 'universal', 'NR-TL') != 'NOUN':
     # Out-of-date tagset, we add a few that we need
-    from nltk.tag import tagset_mapping
     tm=tagset_mapping('en-brown','universal')
     tm['NR-TL']=tm['NR-TL-HL']='NOUN'
 
@@ -36,7 +38,6 @@ class HMM:
     def __init__(self, train_data, test_data):
         """
         Initialise a new instance of the HMM.
-
         :param train_data: The training dataset, a list of sentences with tags
         :type train_data: list(list(tuple(str,str)))
         :param test_data: the test/evaluation dataset, a list of sentence with tags
@@ -63,7 +64,6 @@ class HMM:
     def emission_model(self, train_data):
         """
         Compute an emission model using a ConditionalProbDist.
-
         :param train_data: The training dataset, a list of sentences with tags
         :type train_data: list(list(tuple(str,str)))
         :return: The emission probability distribution and a list of the states
@@ -79,26 +79,21 @@ class HMM:
         #print(train_data)
         data = []
         for i in train_data:
-          for (word, tag) in i: # for each touple
-            data.append((tag, word.lower()))
-        # Compute a Conditional Frequency Distribution for words given their tags using our data    
-        #print(data)
+          for (word,tag) in i:
+            data.append((tag,word.lower()))
+
         emission_FD = ConditionalFreqDist(data)
-        #print(emission_FD)
-        # Compute the Conditional Probability Distribution using the above FD. 
-        # P(word | tag)
         self.emission_PD = ConditionalProbDist(emission_FD, lambda f:nltk.probability.LidstoneProbDist(f,0.01,f.B()+1))
-        # (val, key)
-        self.states = emission_FD.keys()
-        #print(self.states, "\n\n")
+        self.states = list(set([tag for (tag,word) in data]))
+
         return self.emission_PD, self.states
+
 
     # Access function for testing the emission model
     # For example model.elprob('VERB','is') might be -1.4
     def elprob(self,state,word):
         """
         The log of the estimated probability of emitting a word from a state
-
         :param state: the state name
         :type state: str
         :param word: the word
@@ -106,41 +101,34 @@ class HMM:
         :return: log base 2 of the estimated emission probability
         :rtype: float
         """
-        # logprob - Returns the base 2 logarithm of the probability
-        # compute the probability of P(word|state)
-        #raise NotImplementedError('HMM.elprob')
+        # raise NotImplementedError('HMM.elprob')
         return self.emission_PD[state].logprob(word)
-
 
     # Compute transition model using ConditionalProbDist with a LidstonelprobDist estimator.
     # See comments for emission_model above for details on the estimator.
     def transition_model(self, train_data):
         """
         Compute an transition model using a ConditionalProbDist.
-
         :param train_data: The training dataset, a list of sentences with tags
         :type train_data: list(list(tuple(str,str)))
         :return: The transition probability distribution
         :rtype: ConditionalProbDist
         """
-        #raise NotImplementedError('HMM.transition_model')
-        # TODO: prepare the data
+        # raise NotImplementedError('HMM.transition_model')
         data = []
-        # The data object should be an array of tuples of conditions and observations,
-        # in our case the tuples will be of the form (tag_(i),tag_(i+1)).
-        # DON'T FORGET TO ADD THE START SYMBOL </s> and the END SYMBOL </s>
-        for tagged_sentence in train_data:
-          data.append(('<s>',tagged_sentence[0][1]))     
-          for i in range((len(tagged_sentence)-1)):
-            data.append((tagged_sentence[i][1], tagged_sentence[i+1][1]))
-            #print(tagged_sentence[i][1])
-          data.append((tagged_sentence[-1][1],'</s>'))    
+        for s in train_data:
+          last = '<s>' # start sentance
+          for (word, transition) in s:
+            data.append((last, transition))
+            last = transition
+          data.append((last, '</s>')) # end sentence
+    
 
         transition_FD = ConditionalFreqDist(data)
-        self.transition_PD = ConditionalProbDist(transition_FD, lambda fd: LidstoneProbDist(fd, 0.01, fd.B()+1))
-        #print(self.transition_FD)-
+        self.transition_PD = ConditionalProbDist(transition_FD, lambda f:nltk.probability.LidstoneProbDist(f,0.01,f.B()+1))
+
         return self.transition_PD
-  
+
     # Access function for testing the transition model
     # For example model.tlprob('VERB','VERB') might be -2.4
     def tlprob(self,state1,state2):
@@ -153,9 +141,8 @@ class HMM:
         :return: log base 2 of the estimated transition probability
         :rtype: float
         """
-        #raise NotImplementedError('HMM.tlprob')
+        # raise NotImplementedError('HMM.tlprob')
         return self.transition_PD[state1].logprob(state2)
-         
 
     # Train the HMM
     def train(self):
@@ -174,161 +161,159 @@ class HMM:
     def initialise(self, observation):
         """
         Initialise data structures for tagging a new sentence.
-
         :param observation: the first word in the sentence to tag
         :type observation: str
         """
-        #raise NotImplementedError('HMM.initialise')
+        # raise NotImplementedError('HMM.initialise')
         # Initialise step 0 of viterbi, including
         #  transition from <s> to observation
         # use costs (-log-base-2 probabilities)
+        # if the backpointer is 0 means this word is at the beginning
         
-        # Initialisation: for s = 1..k
-        #                pi[1, s] = t(s) * e(x1|s) // pi[j, s] = state s at position j
-        # Store viterbi and backpointer as dictionaries - (key, val)
-        self.viterbi = {}  # COSTS = negative log prob : dictionaries used at each point to manage the possible states
-        self.backpointer = {}  # sequence of tags in a dictionary
+        """
+        The self.viterbi is a chart of structure list[list[float]] looks like
+        __________________________
+        |    | o0 | o1 | o2 | ...
+        | q1 |cost|cost|cost| ...
+        | q2 |cost|cost|cost| ...
+        | q3 |cost|cost|cost| ...
+         ...  ...  ...  ...   ...
+         o_n represents the nth step, also the nth input word count from 0.
+         q_m represents the mth state in the self.states.
+         'cost' is a float represent the negative log likehood cost
+         Thus according to the position of the 'cost' we can know the lowest cost 
+         at step n while q_m is its tag.
+         So the cell q2o2 represents the lowest possible cost if the 2th word is 
+         the state q2
+         
+         The self.backpointer is a chart of structure list[list[int]] looks like
+        __________________________
+        |    | o0 | o1 | o2 | ...
+        | q1 |back|back|back| ...
+        | q2 |back|back|back| ...
+        | q3 |back|back|back| ...
+         ...  ...  ...  ...   ...
+         o_n represents the nth step, also the nth input word count from 0.
+         q_m represents the mth state in the self.states.
+         'back' is an integer represents the index in self.states
+         The 'back' on cell q_mo_n represents the lowest cost path to q_mo_n is from 
+         q_(back)o_(n-1)
+         Also, q_(back) means the 'back'th state in self.states
+        """
+                
+        # Initialise viterbi and backpointer
+        self.viterbi.clear()
+        self.backpointer.clear()
+        # logprob of sentence starting with a state + logprob of the first word | state
+        # logprob of sent starting with the state | word
+        # => addition of costs: log P(tag | <s>) + log P(word | tag)
+        self.viterbi.append([-(self.transition_PD['<s>'].logprob(state) + self.emission_PD[state].logprob(observation)) for state in self.states])
 
-        for state in self.states:
-          # logprob of sentence starting with a state + logprob of the first word | state
-          # logprob of sent starting with the state | word
-          # => addition of costs: log P(tag | <s>) + log P(word | tag)
-          self.viterbi[state,0] = self.transition_PD['<s>'].logprob(state) + self.emission_PD[state].logprob(observation)
-          # Initialise step 0 of backpointer
-          self.backpointer[state, 0] = 0
+        # -1 in backpointer matrix represents <s>, the first column are all from <s>
+        self.backpointer.append([-1 for i in self.states])
 
 
     # Tag a new sentence using the trained model and already initialised data structures.
     # Use the models stored in the variables: self.emission_PD and self.transition_PD.
     # Update the self.viterbi and self.backpointer datastructures.
     # Describe your implementation with comments.
-   # def tag(self, observations):
+    def tag(self, observations):
         """
         Tag a new sentence using the trained model and already initialised data structures.
-
         :param observations: List of words (a sentence) to be tagged
         :type observations: list(str)
         :return: List of tags corresponding to each word of the input
         """
-        #raise NotImplementedError('HMM.tag')
-        # http://web.stanford.edu/~jurafsky/slp3/A.pdf
+        # raise NotImplementedError('HMM.tag')
 
-def tag(self,observations):
-    tags = []
-    index = 0
-    current_decision = []
-    
-    # RECURSION STEP
-    # for all the observations
-    for t in range(1,len(observations)):
-      for state in self.states:
+        o = [w.lower() for w in observations]
+        tags = []
+        minC = 999999999
+        index = 0
+        for t in o: # fixme to iterate over steps
+            viterbi = [minC] * len(self.states)
+            backpointer = [-1] * len(self.states)
+            #iterate through the matrix
+            for sR in self.states: 
+                for sC in self.states:
+                    cost = (- self.elprob(sR, t) - self.tlprob(sC, sR)) + self.get_viterbi_value(sC, index)
+                    if cost < viterbi[self.states.index(sR)]:
+                        # print(self.states.index(s))
+                        viterbi[self.states.index(sR)] = cost
+                        backpointer[self.states.index(sR)] = self.states.index(sC)
+            index+=1
+            self.viterbi.append(viterbi)
+            self.backpointer.append(backpointer)
+
+        # Add a termination step with cost based solely on cost of transition to </s> , end of sentence.
+        self.backpointer.append(list(range(len(self.states))))
+        ter = [0] * len(self.states)
+        idx = 0
+        for ls in self.states:
+            ter[idx] = self.get_viterbi_value(ls, index) - self.tlprob(ls, '</s>')
         
-        # Initialise variables storing max and argmax
-        max_prob = -float('inf')
-        max_i = 0
-        
-        # LogProbability of the t^th word given this state
-        b_j = self.emission_PD[state].logprob(observations[t])
-        
-        for i in range(len(self.states)):
-          # Suppose past_state is the i^th state
-          past_state = self.states[i]
-          # Viterbi[s',t-1]
-          viterbi_ij = self.viterbi[past_state,t-1]
-          # Probability of new state being state given the past_state
-          a_ij = self.transition_PD[past_state].logprob(state)
-          # logProbability of this state in t^th place
-          prob_ij = viterbi_ij + a_ij + b_j
-      
-          # Check if prob is bigger than previous ones, if it is, update
-          if prob_ij > max_prob:
-            max_prob = prob_ij
-            max_i = i
-        
-        # Update viterbi with max -logProbability  - 
-        self.viterbi[state,t] = max_prob 
-        # Update backpointer with argmax -logProbability
-        self.backpointer[state,t] = max_i
+#         ter = [0] * len(self.states)
+#         minCost = 9999999
+#         for ls in self.states:
+#             newCost = self.get_viterbi_value(ls, step) - self.tlprob(ls, '</s>')
+#             if newCost < minCost:
+#                 minCost = newCost
+#                 newBackpointer = self.states.index(ls)
+#         self.viterbi.append([minCost] * len(self.states))
+#         self.backpointer.append([newBackpointer] * len(self.states))
 
-    # TERMINATION STEP (transition to </s>)
-    T = len(observations)
-    
-    # Initialise variables storing max and argmax
-    max_i = 0
-    max_prob = -float('inf')
-    
-    # Iterate over states to get most probable ending state
-    for state in self.states:
-      viterbi_iT = self.viterbi[state,T-1]
-      a_iT = self.transition_PD[state].logprob('</s>') 
-      prob_iT = viterbi_iT + a_iT
-      
-      # Check if prob is bigger than previous ones, if it is, update
-      if prob_iT > max_prob:
-        max_prob = prob_iT
-        max_i = self.states.index(state)
+        # Reconstruct the tag sequence using the backpointer list.
+        # Return the tag sequence corresponding to the best path as a list.
+        # The order should match that of the words in the sentence.
+        index+=1
+        backpointer = self.states[self.viterbi[-1].index(min(self.viterbi[-1]))]
+        while backpointer != '<s>':
+            index-=1
+            tags.append(backpointer)
+            backpointer = self.get_backpointer_value(backpointer, index)
+        tags.reverse()
 
-    # Update viterbi with max -logProbability   
-    self.viterbi['</s>',T] = max_prob
-    # Update backpointer with argmax -logProbability
-    self.backpointer['</s>',T] = max_i
-    
-    # Reconstruct the tag sequence using the backpointer
-    tag = '</s>'
-    t = T
-    tags_reverse = []
-    for w in range(len(observations)):
-      backpointer = self.backpointer[tag,t]
-      tag = self.states[backpointer]
-      tags_reverse.append(tag)
-      t -= 1
-    
-    # Reverse list to match order of words
-    tags = list(reversed(tags_reverse))
-    print(tags)
-    return tags
+        return tags
 
-
-    # Reconstruct the tag sequence using the backpointer list.
-    # Return the tag sequence corresponding to the best path as a list.
-    # The order should match that of the words in the sentence.
-  
     # Access function for testing the viterbi data structure
-    # For example model.get_viterbi_value('VERB',2) might be 6.42 
+    # For example model.get_viterbi_value('VERB',2) might be 6.42
     def get_viterbi_value(self, state, step):
         """
         Return the current value from self.viterbi for
         the state (tag) at a given step
-
         :param state: A tag name
         :type state: str
         :param step: The (0-origin) number of a step:  if negative,
-          counting backwards from the end, i.e. -1 means the last (</s>) step
+          counting backwards from the end, i.e. -1 means the last step
         :type step: int
         :return: The value (a cost) for state as of step
         :rtype: float
         """
-        raise NotImplementedError('HMM.get_viterbi_value')
-        return ... # fix me
+        # raise NotImplementedError('HMM.get_viterbi_value')
+        return self.viterbi[step][self.states.index(state)]
 
     # Access function for testing the backpointer data structure
     # For example model.get_backpointer_value('VERB',2) might be 'NOUN'
-    # Returns what it points back to
     def get_backpointer_value(self, state, step):
         """
         Return the current backpointer from self.backpointer for
         the state (tag) at a given step
-
         :param state: A tag name
         :type state: str
         :param step: The (0-origin) number of a step:  if negative,
-          counting backwards from the end, i.e. -1 means the last (</s>) step
-        :type step: str
+          counting backwards from the end, i.e. -1 means the last step
+        :type step: int
         :return: The state name to go back to at step-1
         :rtype: str
         """
-        raise NotImplementedError('HMM.get_backpointer_value')
-        return ... # fix me
+        # raise NotImplementedError('HMM.get_backpointer_value')
+
+        if step == 0 or step == -len(self.viterbi):
+            return '<s>'
+        elif state == '</s>' and (step == len(self.viterbi) - 1 or step == -1):
+            return self.states[self.backpointer[step][0]]
+        else:
+            return self.states[self.backpointer[step][self.states.index(state)]]
 
 def answer_question4b():
     """
@@ -337,16 +322,27 @@ def answer_question4b():
     :rtype: list(tuple(str,str)), list(tuple(str,str)), str
     :return: your answer [max 280 chars]
     """
-    raise NotImplementedError('answer_question4b')
+    # raise NotImplementedError('answer_question4b')
 
     # One sentence, i.e. a list of word/tag pairs, in two versions
     #  1) As tagged by your HMM
     #  2) With wrong tags corrected by hand
-    tagged_sequence = 'fixme'
-    correct_sequence = 'fixme'
+    #tagged_sequence = [("I'm", 'PRT'), ('useless', 'ADJ'), ('for', 'ADP'), ('anything', 'NOUN'), ('but', 'CONJ'), ('racing', 'ADJ'), ('cars', 'NOUN'), ('.', '.')]
+    #correct_sequence = [("I'm", 'PRT'), ('useless', 'ADJ'), ('for', 'ADP'), ('anything', 'NOUN'), ('but', 'ADP'), ('racing', 'VERB'), ('cars', 'NOUN'), ('.', '.')]
     # Why do you think the tagger tagged this example incorrectly?
-    answer =  inspect.cleandoc("""\
-    fill me in""")[0:280]
+    
+    tagged_sequence = [('Tooling', 'ADV'), ('through', 'ADP'), ('Sydney', 'NOUN'), ('on', 'ADP'), ('his', 'DET'), ('way', 'NOUN'), ('to', 'ADP'), ('race', 'NOUN'), ('in', 'ADP'), ('the', 'DET'), ('New', 'ADJ'), ('Zealand', 'X'), ('Grand', 'X'), ('Prix', 'X')]
+    correct_sequence = [('Tooling', 'ADV'), ('through', 'ADP'), ('Sydney', 'NOUN'), ('on', 'ADP'), ('his', 'DET'), ('way', 'NOUN'), ('to', 'ADP'), ('race', 'NOUN'), ('in', 'ADP'), ('the', 'DET'), ('New', 'NOUN'), ('Zealand', 'NOUN'), ('Grand', 'X'), ('Prix', 'X')]
+
+    answer =  inspect.cleandoc("""HMM can only capture 2-word history, and hence, 'New' is tagged as an adjective as it follows a DET ('the'). As we are using the Brown tagset, some potentially useful distinctions were lost, such as named-entity recognition. Tagging ambiguous words with their most frequent label. Entity recognition (location in the given example) is the core of the information extraction systems. Ambiguity between named entities and common words ('New' as an adjective or personal noun) is an issue here.""")[0:280]
+
+    #tagged_sequence = [('``', '.'), ('My', 'DET'), ('taste', 'NOUN'), ('is', 'VERB'), ('gaudy', 'ADV'), ('.', '.')]
+    #correct_sequence = [('``', '.'), ('My', 'DET'), ('taste', 'NOUN'), ('is', 'VERB'), ('gaudy', 'ADJ'), ('.', '.')]
+    # Why do you think the tagger tagged this example incorrectly?
+    #answer =  inspect.cleandoc("""The HMM model can only capture 2-word history, not long-range dependencies. 'gaudy' is for 'taste', but HMM model only knows it follows a VERB, so tags it as ADV rather than ADJ. Because ADV is more likely follows a VERB, and 'gaudy' has similar cost being ADJ or ADV.""")[0:280]
+
+
+    
 
     return tagged_sequence, correct_sequence, answer
 
@@ -357,26 +353,23 @@ def answer_question5():
         How could you use a POS tagger to ensure that the grammar
         produces a parse for any well-formed sentence,
         even when it doesn't recognise the words within that sentence?
-
     :rtype: str
     :return: your answer [max 500 chars]
     """
-    raise NotImplementedError('answer_question5')
+    # raise NotImplementedError('answer_question5')
+    return inspect.cleandoc("""When no global ambiguities and no unkonw words, the original parser only have 1 valid output, we directly use the output. If there are global ambiguities, the original parser has multiple valid results, use the pre-trained POS tagger to find the most likely one. And if there are unknown words, use the pre-trained tagger to find the most likely tag of that word depends on the transition probabilitiy. So it always better or as well as the original parser.""")[0:500]
 
-    return inspect.cleandoc("""\
-    fill me in""")[0:500]
 
 def answer_question6():
     """
     Why else, besides the speedup already mentioned above, do you think we
     converted the original Brown Corpus tagset to the Universal tagset?
     What do you predict would happen if we hadn't done that?  Why?
-
     :rtype: str
     :return: your answer [max 500 chars]
     """
-    raise NotImplementedError('answer_question6')
-
+    # raise NotImplementedError('answer_question6')
+    #return inspect.cleandoc("""If we use the original tagset, the accuracy on the test set will be much lower. Because with more tags, each tag/word pair has less ovservations, so we have few confidence level on the probability model. And more tags depends on long-range effects, but HMM nodel only catch 2 word history, so they are more errors. And using large complex tagset the annotor is more likely to make errors. Thus the overall accuracy will be lower.""")[0:500]
     return inspect.cleandoc("""\
     fill me in""")[0:500]
 
@@ -390,13 +383,13 @@ def answers():
            train_data_universal, model, test_size, train_size, ttags, \
            correct, incorrect, accuracy, \
            good_tags, bad_tags, answer4b, answer5
-    
+
     # Load the Brown corpus with the Universal tag set.
     tagged_sentences_universal = brown.tagged_sents(categories='news', tagset='universal')
 
     # Divide corpus into train and test data.
     test_size = 500
-    train_size = len(tagged_sentences_universal) - 500
+    train_size = len(tagged_sentences_universal) - test_size
 
     test_data_universal = tagged_sentences_universal[-test_size:] # fixme
     train_data_universal = tagged_sentences_universal[:train_size] # fixme
@@ -425,17 +418,15 @@ def answers():
             type(model.states[0])==str):
         print('model.states value (%s) must be a non-empty list of strings'%model.states,file=sys.stderr)
 
-  #  print('states: %s\n'%model.states)
-
+    print('states: %s\n'%model.states)
 
     ######
     # Try the model, and test its accuracy [won't do anything useful
     #  until you've filled in the tag method
     ######
-
     s='the cat in the hat came back'.split()
     model.initialise(s[0])
-    ttags = model.tag(s) # fixme ?
+    ttags = model.tag(s)
     print("Tagged a trial sentence:\n  %s"%list(zip(s,ttags)))
 
     v_sample=model.get_viterbi_value('VERB',5)
@@ -450,19 +441,32 @@ def answers():
     # check the model's accuracy (% correct) using the test set
     correct = 0
     incorrect = 0
+    idx = 0
 
+    gold_sents = []
+    tagged_sents = []
     for sentence in test_data_universal:
+        wrong = False
         s = [word.lower() for (word, tag) in sentence]
         model.initialise(s[0])
         tags = model.tag(s)
 
         for ((word,gold),tag) in zip(sentence,tags):
             if tag == gold:
-                correct+=1
+                correct += 1 
             else:
-                incorrect+=1
+                incorrect += 1 
+                wrong = True
+        if wrong and idx < 10:
+            idx += 1
+            gold_sents.append(sentence)
+            origin_sent = [word for (word, tag) in sentence]
+            tagged_sents.append(list(zip(origin_sent, tags)))
+    print(gold_sents)
+    print(tagged_sents)
+        
 
-    accuracy = 1.0*correct/(correct+incorrect)
+    accuracy = correct / (correct + incorrect) # fix me
     print('Tagging accuracy for test set of %s sentences: %.4f'%(test_size,accuracy))
 
     # Print answers for 4b, 5 and 6
