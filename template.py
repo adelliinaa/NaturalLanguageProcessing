@@ -226,51 +226,43 @@ class HMM:
         """
         # raise NotImplementedError('HMM.tag')
 
-        o = [w.lower() for w in observations]
+        # Transfer the observations into lowercase
+        o = [word.lower() for word in observations]
         tags = []
-        minC = 999999999
-        index = 0
-        for t in o: # fixme to iterate over steps
-            viterbi = [minC] * len(self.states)
-            backpointer = [-1] * len(self.states)
-            #iterate through the matrix
-            for sR in self.states: 
-                for sC in self.states:
-                    cost = (- self.elprob(sR, t) - self.tlprob(sC, sR)) + self.get_viterbi_value(sC, index)
-                    if cost < viterbi[self.states.index(sR)]:
-                        # print(self.states.index(s))
-                        viterbi[self.states.index(sR)] = cost
-                        backpointer[self.states.index(sR)] = self.states.index(sC)
-            index+=1
+        cMin = [float('inf')]
+        step = 0
+        i = 0
+        for t in o: 
+            # viterbi and backpointer columns
+            viterbi = cMin * len(self.states)             
+            backpointer = [-1] * len(self.states)       
+            # Compute and find the lowest cost
+            for step0 in self.states:   
+                for step1 in self.states:  # for each current possible state, find the best last state
+                    # Sum up the transition, emission and the cost of the previous step
+                    cost = -(self.transition_PD[step1].logprob(step0) + self.emission_PD[step0].logprob(t)) + self.get_viterbi_value(step1, step)
+                    # Check if there is a lower cost
+                    if cost < viterbi[self.states.index(step0)]:
+                        viterbi[self.states.index(step0)] = cost
+                        backpointer[self.states.index(step0)] = self.states.index(step1)
+            step += 1  
+            # Update viterbi and backpointer 
             self.viterbi.append(viterbi)
             self.backpointer.append(backpointer)
 
-        # Add a termination step with cost based solely on cost of transition to </s> , end of sentence.
-        self.backpointer.append(list(range(len(self.states))))
-        ter = [0] * len(self.states)
-        idx = 0
-        for ls in self.states:
-            ter[idx] = self.get_viterbi_value(ls, index) - self.tlprob(ls, '</s>')
-        
-#         ter = [0] * len(self.states)
-#         minCost = 9999999
-#         for ls in self.states:
-#             newCost = self.get_viterbi_value(ls, step) - self.tlprob(ls, '</s>')
-#             if newCost < minCost:
-#                 minCost = newCost
-#                 newBackpointer = self.states.index(ls)
-#         self.viterbi.append([minCost] * len(self.states))
-#         self.backpointer.append([newBackpointer] * len(self.states))
+        # Cost of transition to </s> 
+        terminate = [0] * len(self.states)  
+        for step0 in self.states:
+            terminate[i] = self.get_viterbi_value(step0, step) - self.tlprob(step0, '</s>')
+            i += 1
+        # Get minimum cost
+        backpointer = self.states[terminate.index(min(terminate))]
 
-        # Reconstruct the tag sequence using the backpointer list.
-        # Return the tag sequence corresponding to the best path as a list.
-        # The order should match that of the words in the sentence.
-        index+=1
-        backpointer = self.states[self.viterbi[-1].index(min(self.viterbi[-1]))]
         while backpointer != '<s>':
-            index-=1
             tags.append(backpointer)
-            backpointer = self.get_backpointer_value(backpointer, index)
+            backpointer = self.get_backpointer_value(backpointer, step)
+            step -= 1
+        
         tags.reverse()
 
         return tags
@@ -324,26 +316,11 @@ def answer_question4b():
     """
     # raise NotImplementedError('answer_question4b')
 
-    # One sentence, i.e. a list of word/tag pairs, in two versions
-    #  1) As tagged by your HMM
-    #  2) With wrong tags corrected by hand
-    #tagged_sequence = [("I'm", 'PRT'), ('useless', 'ADJ'), ('for', 'ADP'), ('anything', 'NOUN'), ('but', 'CONJ'), ('racing', 'ADJ'), ('cars', 'NOUN'), ('.', '.')]
-    #correct_sequence = [("I'm", 'PRT'), ('useless', 'ADJ'), ('for', 'ADP'), ('anything', 'NOUN'), ('but', 'ADP'), ('racing', 'VERB'), ('cars', 'NOUN'), ('.', '.')]
-    # Why do you think the tagger tagged this example incorrectly?
-    
     tagged_sequence = [('Tooling', 'ADV'), ('through', 'ADP'), ('Sydney', 'NOUN'), ('on', 'ADP'), ('his', 'DET'), ('way', 'NOUN'), ('to', 'ADP'), ('race', 'NOUN'), ('in', 'ADP'), ('the', 'DET'), ('New', 'ADJ'), ('Zealand', 'X'), ('Grand', 'X'), ('Prix', 'X')]
     correct_sequence = [('Tooling', 'ADV'), ('through', 'ADP'), ('Sydney', 'NOUN'), ('on', 'ADP'), ('his', 'DET'), ('way', 'NOUN'), ('to', 'ADP'), ('race', 'NOUN'), ('in', 'ADP'), ('the', 'DET'), ('New', 'NOUN'), ('Zealand', 'NOUN'), ('Grand', 'X'), ('Prix', 'X')]
 
-    answer =  inspect.cleandoc("""HMM can only capture 2-word history, and hence, 'New' is tagged as an adjective as it follows a DET ('the'). As we are using the Brown tagset, some potentially useful distinctions were lost, such as named-entity recognition. Tagging ambiguous words with their most frequent label. Entity recognition (location in the given example) is the core of the information extraction systems. Ambiguity between named entities and common words ('New' as an adjective or personal noun) is an issue here.""")[0:280]
-
-    #tagged_sequence = [('``', '.'), ('My', 'DET'), ('taste', 'NOUN'), ('is', 'VERB'), ('gaudy', 'ADV'), ('.', '.')]
-    #correct_sequence = [('``', '.'), ('My', 'DET'), ('taste', 'NOUN'), ('is', 'VERB'), ('gaudy', 'ADJ'), ('.', '.')]
-    # Why do you think the tagger tagged this example incorrectly?
-    #answer =  inspect.cleandoc("""The HMM model can only capture 2-word history, not long-range dependencies. 'gaudy' is for 'taste', but HMM model only knows it follows a VERB, so tags it as ADV rather than ADJ. Because ADV is more likely follows a VERB, and 'gaudy' has similar cost being ADJ or ADV.""")[0:280]
-
-
+    answer =  inspect.cleandoc("""In our model, the probaility of'New' being used as an adjective after the article 'the' is higher than the probability oF being used as a personal noun. As the algorithm does not capture longer word sequences, some potentially useful distinctions are lost, such as named-entity recognition, and it can tag ambiguous words with their most frequent label. Entity recognition (location in the given example) is the core of the information extraction systems. Ambiguity between named entities and common words ('New' as an adjective or personal noun) is an issue here.""")[0:280]
     
-
     return tagged_sequence, correct_sequence, answer
 
 def answer_question5():
@@ -426,7 +403,7 @@ def answers():
     ######
     s='the cat in the hat came back'.split()
     model.initialise(s[0])
-    ttags = model.tag(s)
+    ttags = model.tag(s[1:])
     print("Tagged a trial sentence:\n  %s"%list(zip(s,ttags)))
 
     v_sample=model.get_viterbi_value('VERB',5)
@@ -437,36 +414,35 @@ def answers():
     if not (type(b_sample)==str and b_sample in model.states):
            print('backpointer value (%s) must be a state name'%b_sample,file=sys.stderr)
 
-
     # check the model's accuracy (% correct) using the test set
     correct = 0
     incorrect = 0
-    idx = 0
 
-    gold_sents = []
-    tagged_sents = []
+    idx = 0
+    POS = []
+    sent = []
     for sentence in test_data_universal:
         wrong = False
         s = [word.lower() for (word, tag) in sentence]
         model.initialise(s[0])
-        tags = model.tag(s)
+        tags = model.tag(s[1:])
 
         for ((word,gold),tag) in zip(sentence,tags):
             if tag == gold:
-                correct += 1 
+                correct+=1
             else:
-                incorrect += 1 
+                incorrect+=1
                 wrong = True
         if wrong and idx < 10:
-            idx += 1
-            gold_sents.append(sentence)
-            origin_sent = [word for (word, tag) in sentence]
-            tagged_sents.append(list(zip(origin_sent, tags)))
-    print(gold_sents)
-    print(tagged_sents)
-        
+            idx+=1
+            sent.append(sentence)
+            orig = [word for (word, tag) in sentence]
+            POS.append(list(zip(orig, tags)))
+    print(sent)
+    print(POS)
 
-    accuracy = correct / (correct + incorrect) # fix me
+    # Calculate the accuracy
+    accuracy = correct/(correct+incorrect)
     print('Tagging accuracy for test set of %s sentences: %.4f'%(test_size,accuracy))
 
     # Print answers for 4b, 5 and 6
@@ -483,6 +459,7 @@ def answers():
     answer6=answer_question6()
     print('\nFor Q6:')
     print(answer6[:500])
+
 
 if __name__ == '__main__':
     if len(sys.argv)>1 and sys.argv[1] == '--answers':
