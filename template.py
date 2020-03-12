@@ -14,20 +14,17 @@ try:
 except NameError:
     # didn't load, produce the warning
     import nltk
+import itertools
+chain = itertools.chain.from_iterable
 
 from nltk.corpus import brown
 from nltk.tag import map_tag, tagset_mapping
-#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# module for training a Hidden Markov Model and tagging sequences
+from nltk.tag.hmm import HiddenMarkovModelTagger
 # module for computing a Conditional Frequency Distribution
 from nltk.probability import ConditionalFreqDist
-
 # module for computing a Conditional Probability Distribution
-from nltk.probability import ConditionalProbDist
-
-from nltk.probability import LidstoneProbDist
-import itertools
-chain = itertools.chain.from_iterable
-#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+from nltk.probability import ConditionalProbDist, LidstoneProbDist
 
 if map_tag('brown', 'universal', 'NR-TL') != 'NOUN':
     # Out-of-date tagset, we add a few that we need
@@ -117,12 +114,13 @@ class HMM:
         # raise NotImplementedError('HMM.transition_model')
         data = []
         for s in train_data:
-          last = '<s>' # start sentance
+          # Start of sentance
+          last = '<s>' 
           for (word, transition) in s:
             data.append((last, transition))
             last = transition
-          data.append((last, '</s>')) # end sentence
-    
+          # End of sentence
+          data.append((last, '</s>')) 
 
         transition_FD = ConditionalFreqDist(data)
         self.transition_PD = ConditionalProbDist(transition_FD, lambda f:nltk.probability.LidstoneProbDist(f,0.01,f.B()+1))
@@ -170,36 +168,6 @@ class HMM:
         # use costs (-log-base-2 probabilities)
         # if the backpointer is 0 means this word is at the beginning
         
-        """
-        The self.viterbi is a chart of structure list[list[float]] looks like
-        __________________________
-        |    | o0 | o1 | o2 | ...
-        | q1 |cost|cost|cost| ...
-        | q2 |cost|cost|cost| ...
-        | q3 |cost|cost|cost| ...
-         ...  ...  ...  ...   ...
-         o_n represents the nth step, also the nth input word count from 0.
-         q_m represents the mth state in the self.states.
-         'cost' is a float represent the negative log likehood cost
-         Thus according to the position of the 'cost' we can know the lowest cost 
-         at step n while q_m is its tag.
-         So the cell q2o2 represents the lowest possible cost if the 2th word is 
-         the state q2
-         
-         The self.backpointer is a chart of structure list[list[int]] looks like
-        __________________________
-        |    | o0 | o1 | o2 | ...
-        | q1 |back|back|back| ...
-        | q2 |back|back|back| ...
-        | q3 |back|back|back| ...
-         ...  ...  ...  ...   ...
-         o_n represents the nth step, also the nth input word count from 0.
-         q_m represents the mth state in the self.states.
-         'back' is an integer represents the index in self.states
-         The 'back' on cell q_mo_n represents the lowest cost path to q_mo_n is from 
-         q_(back)o_(n-1)
-         Also, q_(back) means the 'back'th state in self.states
-        """
                 
         # Initialise viterbi and backpointer
         self.viterbi.clear()
@@ -208,10 +176,7 @@ class HMM:
         # logprob of sent starting with the state | word
         # => addition of costs: log P(tag | <s>) + log P(word | tag)
         self.viterbi.append([-(self.transition_PD['<s>'].logprob(state) + self.emission_PD[state].logprob(observation)) for state in self.states])
-
-        # -1 in backpointer matrix represents <s>, the first column are all from <s>
         self.backpointer.append([-1 for i in self.states])
-
 
     # Tag a new sentence using the trained model and already initialised data structures.
     # Use the models stored in the variables: self.emission_PD and self.transition_PD.
@@ -226,14 +191,14 @@ class HMM:
         """
         # raise NotImplementedError('HMM.tag')
 
-        # Transfer the observations into lowercase
-        o = [word.lower() for word in observations]
+        # reference: https://web.stanford.edu/~jurafsky/slp3/A.pdf
+        
         tags = []
         cMin = [float('inf')]
         step = 0
         i = 0
-        for t in o: 
-            # viterbi and backpointer columns
+        for t in [word.lower() for word in observations]: 
+            # Viterbi and backpointer columns
             viterbi = cMin * len(self.states)             
             backpointer = [-1] * len(self.states)       
             # Compute and find the lowest cost
@@ -241,7 +206,7 @@ class HMM:
                 for step1 in self.states:  # for each current possible state, find the best last state
                     # Sum up the transition, emission and the cost of the previous step
                     cost = -(self.transition_PD[step1].logprob(step0) + self.emission_PD[step0].logprob(t)) + self.get_viterbi_value(step1, step)
-                    # Check if there is a lower cost
+                    # Check whether there is a lower cost
                     if cost < viterbi[self.states.index(step0)]:
                         viterbi[self.states.index(step0)] = cost
                         backpointer[self.states.index(step0)] = self.states.index(step1)
@@ -267,8 +232,7 @@ class HMM:
 
         return tags
 
-    # Access function for testing the viterbi data structure
-    # For example model.get_viterbi_value('VERB',2) might be 6.42
+
     def get_viterbi_value(self, state, step):
         """
         Return the current value from self.viterbi for
@@ -284,8 +248,7 @@ class HMM:
         # raise NotImplementedError('HMM.get_viterbi_value')
         return self.viterbi[step][self.states.index(state)]
 
-    # Access function for testing the backpointer data structure
-    # For example model.get_backpointer_value('VERB',2) might be 'NOUN'
+
     def get_backpointer_value(self, state, step):
         """
         Return the current backpointer from self.backpointer for
@@ -334,7 +297,7 @@ def answer_question5():
     :return: your answer [max 500 chars]
     """
     # raise NotImplementedError('answer_question5')
-    return inspect.cleandoc("""When no global ambiguities and no unkonw words, the original parser only have 1 valid output, we directly use the output. If there are global ambiguities, the original parser has multiple valid results, use the pre-trained POS tagger to find the most likely one. And if there are unknown words, use the pre-trained tagger to find the most likely tag of that word depends on the transition probabilitiy. So it always better or as well as the original parser.""")[0:500]
+    return inspect.cleandoc("""To ensure that the grammar produces a parse for any well-formed sentence, we consider 2 cases: For unseen words and ambiguities, we use the pre-trained POS tagger to find the most likely tag bases on the transition probability. For any other word, we use the output generated by the original parser (using a tree of the sentence based on the POS instead of the actual words).""")[0:500]
 
 
 def answer_question6():
@@ -346,9 +309,7 @@ def answer_question6():
     :return: your answer [max 500 chars]
     """
     # raise NotImplementedError('answer_question6')
-    #return inspect.cleandoc("""If we use the original tagset, the accuracy on the test set will be much lower. Because with more tags, each tag/word pair has less ovservations, so we have few confidence level on the probability model. And more tags depends on long-range effects, but HMM nodel only catch 2 word history, so they are more errors. And using large complex tagset the annotor is more likely to make errors. Thus the overall accuracy will be lower.""")[0:500]
-    return inspect.cleandoc("""\
-    fill me in""")[0:500]
+    return inspect.cleandoc("""The Universal tag set comprises of 12 tag classes, whereas the Brown Corpus consists of 87. We use the first one in order to get more precise estimates for both the emission and transition probabilities. Using the latter would result in less accurate probabilities, as the possibility of each word taking 87 tags would result in many emission and transition probabilities close to 0 and hence, many errors in the POS tag.""")[0:500]
 
 # Useful for testing
 def isclose(a, b, rel_tol=1e-09, abs_tol=0.0):
